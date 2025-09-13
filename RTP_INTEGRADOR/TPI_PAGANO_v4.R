@@ -21,7 +21,7 @@ library(gridExtra)
 
 library(geoR)
 library(gstat)
-library(sp)
+library(leaflet)
 library(sf)
 library(raster)
 
@@ -92,15 +92,51 @@ interp_ppt <- interp(x = df$Longitud,
 
 filled.contour(interp_ppt,
                color.palette = colorRampPalette(brewer.pal(10, "YlGnBu")),
+               # levels = pretty(range(df$Precipitaciones), n = 10),
                xlab = "Longitud",
                ylab = "Latitud",
                main = "Distribución espacial preliminar de Precipitaciones (mm/año)",
                plot.axes = {
                  axis(1); axis(2)
-                 contour(interp_ppt, add = TRUE, drawlabels = FALSE, lwd = 0.5)
+                 contour(interp_ppt, add = TRUE, drawlabels = TRUE, lwd = 0.5)
                  points(df$Longitud, df$Latitud, pch = 20, col = "black")
                },
                asp = 1)
+
+
+# Paso 1: convertir interpolación a raster
+r_interp <- raster(list(x = interp_ppt$x,
+                        y = interp_ppt$y,
+                        z = interp_ppt$z))
+
+# Paso 2: paleta de colores
+pal <- colorNumeric(palette = "YlGnBu", domain = values(r_interp), na.color = "transparent")
+
+# Paso 3: mapa leaflet
+leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%  # mapa base
+  addRasterImage(r_interp, colors = pal, opacity = 0.5) %>%  # capa interpolada
+  addLegend(pal = pal, values = values(r_interp),
+            title = "Precipitaciones (mm/año)") %>% 
+  # Puntos con popup
+  addCircleMarkers(data = df,
+                   lng = ~Longitud, lat = ~Latitud,
+                   radius = 2, color = "black", fill = TRUE,
+                   popup = ~paste0(
+                     "Localidad: ", Localidad, "<br>",
+                     "Precipitaciones: ", Precipitaciones, " mm"
+                   )) %>%
+  # Etiquetas visibles
+  addLabelOnlyMarkers(data = df,
+                      lng = ~Longitud, lat = ~Latitud,
+                      label = ~Localidad,
+                      labelOptions = labelOptions(noHide = TRUE, 
+                                                  textOnly = TRUE,
+                                                  direction = "top",
+                                                  textsize = "12px",
+                                                  offset = c(0,5)))
+
+
 
 
 df_geodata <- as.geodata(df, coords.col = c("Longitud", "Latitud"), data.col = "Precipitaciones")
@@ -132,7 +168,7 @@ legend("topright", legend = c("Baja", "Media", "Alta"),
 par(mfrow = c(1,2))
 # Scatter Longitud vs Precipitaciones
 plot(df$Longitud, df$Precipitaciones,
-     pch = 20, col = "blue",
+     pch = 10, col = "blue",
      main = "Longitud vs Precipitaciones",
      xlab = "Longitud", ylab = "Precipitación (mm/año)")
 abline(lm(Precipitaciones ~ Longitud, data = df), col = "red", lwd = 2)
@@ -216,6 +252,9 @@ cat("Kurtosis ", kurtosis(df$Precipitaciones), "\n")   # curtosis
 # Posibles Transformaciones
 df$prec_log  <- ifelse(df$Precipitaciones > 0, log(df$Precipitaciones), NA)
 df$prec_sqrt <- sqrt(df$Precipitaciones)
+
+bc_trans <- powerTransform(df$Precipitaciones)
+summary(bc_trans)
 df$prec_bc <- bcPower(df$Precipitaciones, coef(bc_trans))
 
 sh_log  <- shapiro.test(na.omit(df$prec_log))
@@ -228,28 +267,31 @@ cat("Shapiro sqrt p =", signif(sh_sqrt$p.value,3), "\n")
 # ---- Histogramas ----
 par(mfrow=c(1,3))
 hist(df$Precipitaciones, prob = TRUE,
-     main = "Histograma con curva normal",
+     main = "Histograma Ppts con curva normal",
      ylab = "Frecuencia",
-     xlab = "Precipitación (mm/año)")
-x <- seq(min(df$Precipitaciones), max(df$Precipitaciones), length = 40)
-f <- dnorm(x, mean = mean(df$Precipitaciones), sd = sd(df$Precipitaciones))
-lines(x, f, col = "red", lwd = 2)
+     xlab = "Precipitación (mm/año)",
+     col = "lightblue",
+     border = "white")
+lines(density(df$Precipitaciones, na.rm = TRUE),
+      col = "red", lwd = 2)
 
 hist(df$prec_log, prob = TRUE,
-     main = "Histograma con curva normal",
+     main = "Histograma Ppts Log con curva normal",
      ylab = "Frecuencia",
-     xlab = "Precipitación log (mm/año)")
-x <- seq(min(df$prec_log), max(df$prec_log), length = 40)
-f <- dnorm(x, mean = mean(df$prec_log), sd = sd(df$prec_log))
-lines(x, f, col = "red", lwd = 2)
+     xlab = "Precipitación log (mm/año)",
+     col = "lightblue",
+     border = "white")
+lines(density(df$prec_log, na.rm = TRUE),
+      col = "red", lwd = 2)
 
 hist(df$prec_sqrt, prob = TRUE,
-     main = "Histograma con curva normal",
+     main = "Histograma PPts Sqrt con curva normal",
      ylab = "Frecuencia",
-     xlab = "Precipitación sqrt (mm/año)")
-x <- seq(min(df$prec_sqrt), max(df$prec_sqrt), length = 40)
-f <- dnorm(x, mean = mean(df$prec_sqrt), sd = sd(df$prec_sqrt))
-lines(x, f, col = "red", lwd = 2)
+     xlab = "Precipitación sqrt (mm/año)",
+     col = "lightblue",
+     border = "white")
+lines(density(df$prec_sqrt, na.rm = TRUE),
+      col = "red", lwd = 2)
 
 # ---- QQ-plots ----
 par(mfrow=c(1,3))
@@ -262,6 +304,21 @@ qqline(df$prec_log, col="red")
 qqnorm(df$prec_sqrt, main="QQ-Plot Sqrt", ylab="sqrt(precipitaciones)")
 qqline(df$prec_sqrt, col="red")
 par(mfrow=c(1,1))
+
+
+
+par(mfrow=c(1,2))
+hist(df$Precipitaciones, prob = TRUE,
+     main = "Histograma Precipitaciones",
+     ylab = "Frecuencia",
+     xlab = "Precipitación (mm/año)",
+     col = "lightblue",
+     border = "white")
+lines(density(df$Precipitaciones, na.rm = TRUE),
+      col = "red", lwd = 2)
+qqnorm(df$Precipitaciones, main="QQ-Plot Precipitaciones")
+qqline(df$Precipitaciones, col="red")
+
 
 
 shapiro <- shapiro.test(df$prec_log)  # Shapiro-Wilk
@@ -284,8 +341,6 @@ cat("Asimetría ", skewness(df$prec_bc), "\n")
 cat("Kurtosis ", kurtosis(df$prec_bc), "\n")
 
 
-bc_trans <- powerTransform(df$Precipitaciones)
-summary(bc_trans)
 
 
 get_results <- function(x, nombre){
@@ -312,65 +367,56 @@ print(tabla_resumen)
 # ---- ANÁLISIS GEOESTADÍSTICO ----
 # Requisitos: geoR, gstat, sp, sf, raster
 
-# 1) Preparar datos: si detectaste tendencia fuerte, modelala y usa residuos
-# (si no, comentá la parte de la regresión y usá Precipitaciones directamente)
+# 1) Preparar Datos
 m_trend <- lm(Precipitaciones ~ Longitud + Latitud, data = df)
 df$resid_trend <- residuals(m_trend)
 
-# Elegir qué variable usar:
-use_residuals_for_variogram <- FALSE
 
-if(use_residuals_for_variogram){
-  data_for_geo <- df
-  data_for_geo$zvar <- df$resid_trend
-  message("Usando residuos del modelo de tendencia")
-} else {
-  data_for_geo <- df
-  data_for_geo$zvar <- df$Precipitaciones
-  message("Usando precipitaciones originales")
-}
+data_for_geo <- df
+data_for_geo$zvar <- df$Precipitaciones
 
 # 2) Crear objeto geoR
 geod <- as.geodata(data_for_geo, 
                    coords.col = c("Longitud","Latitud"), 
                    data.col = "Precipitaciones")
 
-# Ver duplicados
+# 3) Ver duplicados
 dup.coords(geod)
 
-variograma_exp_ppts <- variog(geod)
-
-
 # 4) Variogramas experimentales
+# Opción 1 con variog
+variograma_exp_variog_1 <- variog(geod)
+
+# Opción 2 con variog
 maxd <- max(dist(geod$coords)) / 2
 uvec <- seq(0, maxd, length.out = 12)
-
-vario_exp <- variog(geod, uvec = uvec, tol.hor = uvec[2]/2)
+vario_exp_variog_2 <- variog(geod, uvec = uvec, tol.hor = uvec[2]/2)
 
 df_sp <- df
 
 coordinates(df_sp) <- ~ Longitud + Latitud
 
 par(mfrow=c(1,2))
-plot(vario_exp, 
+plot(vario_exp_variog_2, 
      main = "Variograma experimental de Ppts (con uvec y tol.hor)",
      xlab = "Distancia", 
      ylab = "Semivarianza")
-plot(variograma_exp_ppts, main="Varigorama: valores de Ppts")
+plot(variograma_exp_variog_1, main="Varigorama: valores de Ppts")
 
 max_dist <- max(spDists(df_sp, longlat = TRUE))
 
-
-variograma_exp_ppts_2 <- variogram(Precipitaciones ~ 1, df_sp, cutoff = max_dist/2, width = 0.2)
-plot(variograma_exp_ppts_2, lwd = 2)
-variograma_exp_ppts_3 <- variogram(Precipitaciones ~ 1, df_sp)
-plot(variograma_exp_ppts_3, lwd = 2)
+# Opción 3 con variogram
+variograma_exp_variogram_3 <- variogram(Precipitaciones ~ 1, df_sp, cutoff = max_dist/2, width = 0.2)
+plot(variograma_exp_variogram_3, lwd = 2)
+# Opción 4 con variogram
+variograma_exp_variogram_4 <- variogram(Precipitaciones ~ 1, df_sp)
+plot(variograma_exp_variogram_4, lwd = 2)
 
 
 
 par(mfrow=c(1,2))
-p1 <- plot(variograma_exp_ppts_2, main="Variograma con Cutoff + Width")
-p2 <- plot(variograma_exp_ppts_3, main="Variograma por Default")
+p1 <- plot(variograma_exp_variogram_3, main="Variograma con Cutoff + Width")
+p2 <- plot(variograma_exp_variogram_4, main="Variograma por Default")
 
 grid.arrange(p1, p2, ncol=2)
 
@@ -383,16 +429,15 @@ grid.arrange(p1, p2, ncol=2)
 
 
 # 5) Ajuste de modelos teóricos con likfit (ML y REML)
-# Modelos a probar: spherical (sph), exponential (exp), gaussian (gau). 'wave' opcional.
-# Varianza empírica de la variable
 # Opcion 1: Max Distance=2.33 Sill= 103574  Range=1.26  Nugget=14286
 # Opcion 2: Max Distance=2.33 Sill= 11786  Range=1.13  Nugget=3571
 # Opcion 3: Max Distance=¿? Sill= 140966  Range=3.939  Nugget=853
+
+# Varianza empírica de la variable
 emp_var <- var(geod$data, na.rm = TRUE)
 
 # Parámetros iniciales (heurística)
 ini_cov_pars <- c(emp_var * 0.6, 0.25 * max(dist(geod$coords)))  
-# c(sigma2, rango)
 
 # Ajustar modelos con ML y REML
 models <- c("sph", "exp", "gau")
@@ -471,7 +516,7 @@ if(!is.null(best_fit)){
 selected_variogram <- likfit(geod, cov.model = "spherical", ini.cov.pars = c(140966.260, 3.939), lik.method = "REML", nugget = 852.697)
 
 
-pred_grilla <- expand.grid(x = seq(min(geod$coords[,1]),
+pred_grid <- expand.grid(x = seq(min(geod$coords[,1]),
                                    max(geod$coords[,1]), l= 100),
                            y = seq(min(geod$coords[,2]),
                                    max(geod$coords[,2]), l= 100)
@@ -479,10 +524,10 @@ pred_grilla <- expand.grid(x = seq(min(geod$coords[,1]),
 
 plot(geod$coords, pch = 20, asp = 1)
 
-points(pred_grilla, pch = "+", cex = 0.2, col="green")
+points(pred_grid, pch = "+", cex = 0.2, col="green")
 
 
-ko_reml <- krige.conv(geod, locations = pred_grilla, krige = krige.control(obj.model = selected_variogram))
+ko_reml <- krige.conv(geod, locations = pred_grid, krige = krige.control(obj.model = selected_variogram))
 
 summary(ko_reml)
 
@@ -490,7 +535,7 @@ summary(ko_reml)
 df_sp <- df
 coordinates(df_sp) <- ~ Longitud + Latitud
 
-ko_reml_sp <- SpatialPixelsDataFrame(points=pred_grilla, data = data.frame(ko_reml[1:2]))
+ko_reml_sp <- SpatialPixelsDataFrame(points=pred_grid, data = data.frame(ko_reml[1:2]))
 
 spplot(ko_reml_sp, zcol="predict", col.regions=colorRampPalette(brewer.pal(9, "Blues"))(100), main="Predicciones de Precipitaciones", xlab="Longitud", ylab="Latitud")
 
