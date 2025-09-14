@@ -385,7 +385,30 @@ dup.coords(geod)
 
 # 4) Variogramas experimentales
 # Opción 1 con variog
-variograma_exp_variog_1 <- variog(geod)
+par(mfrow=c(1,1))
+vario_exp_variog_1 <- variog(geod)
+plot(vario_exp_variog_1,
+     main = "Variograma Experimental de Precipitaciones", # título
+     xlab = "Distancia",                                  # etiqueta eje X
+     ylab = "Semivarianza",                               # etiqueta eje Y
+     pch = 19,                                            # estilo de punto
+     col = "skyblue",                                    # color de puntos
+     cex = 1.2,                                           # tamaño de puntos
+     lwd = 2,                                             # grosor de líneas
+     col.main = "black",                                  # color del título
+     col.lab = "black",                                   # color de etiquetas de ejes
+     col.axis = "gray40",                                 # color de números de ejes
+     cex.main = 1.5,                                      # tamaño del título
+     cex.lab = 1.3,                                       # tamaño etiquetas de ejes
+     cex.axis = 1.1                                       # tamaño números ejes
+)
+
+# Agregar rejilla para mejorar lectura
+grid(col = "lightgray", lty = "dotted")
+
+# Agregar línea de tendencia (opcional, usando loess)
+lines(lowess(vario_exp_variog_1$u, vario_exp_variog_1$v),
+      col = "grey", lwd = 2, lty = 2)
 
 # Opción 2 con variog
 maxd <- max(dist(geod$coords)) / 2
@@ -401,7 +424,7 @@ plot(vario_exp_variog_2,
      main = "Variograma experimental de Ppts (con uvec y tol.hor)",
      xlab = "Distancia", 
      ylab = "Semivarianza")
-plot(variograma_exp_variog_1, main="Varigorama: valores de Ppts")
+plot(vario_exp_variog_1, main="Varigorama: valores de Ppts")
 
 max_dist <- max(spDists(df_sp, longlat = TRUE))
 
@@ -489,16 +512,49 @@ best_fit <- fits[[best_row$model]][[tolower(best_row$method)]]
 
 
 # 8) Interpretación directa de parámetros (ejemplo)
-plot(vario_exp, main = "Variograma experimental con ajustes")
-cols <- c("red","blue","green")
+# Variograma experimental con ajustes
+par(mfrow=c(1,1))
+plot(vario_exp_variog_1,
+     main = "Variograma experimental con ajustes",
+     xlab = "Distancia (km)",     # O "Distancia (°)" si no convertiste coords
+     ylab = "Semivarianza γ(h)",
+     pch = 19,                    # puntos sólidos
+     col = "black",
+     cex = 1.2,                   # tamaño puntos
+     cex.lab = 1.2,               # etiquetas ejes más grandes
+     cex.main = 1.3,              # título más grande
+     cex.axis = 1.1,              # valores de los ejes más grandes
+     las = 1,                     # ejes horizontales
+     xlim = c(0, max(vario_exp_variog_1$u)*1.1),  # margen extra en eje x
+     ylim = c(0, max(vario_exp_variog_1$v)*1.1)   # margen extra en eje y
+)
+
+# Colores personalizados para modelos
+cols <- c("red", "blue", "forestgreen", "purple")
+ltys <- c(1, 1, 1, 1)   # distintos estilos de línea
+lwds <- c(2, 2, 2, 2)
+
 i <- 1
 for(mod in names(fits)){
   if(!is.null(fits[[mod]]$reml)){
-    lines(fits[[mod]]$reml, col = cols[i], lwd = 2)
+    lines(fits[[mod]]$reml,
+          col = cols[i],
+          lwd = lwds[i],
+          lty = ltys[i])
     i <- i + 1
   }
 }
-legend("topright", legend = names(fits), col = cols, lty = 1, bty = "n")
+
+# Leyenda con fondo transparente
+legend("bottomright",
+       legend = names(fits),
+       col = cols[1:(i-1)],
+       lty = ltys[1:(i-1)],
+       lwd = lwds[1:(i-1)],
+       bty = "n",                 # sin borde
+       cex = 1.1,                 # tamaño texto
+       title = "Modelos")
+
 
 
 if(!is.null(best_fit)){
@@ -548,6 +604,80 @@ spplot(ko_reml_sp, zcol="predict",
        contour=TRUE,
        main="Predicciones de Precipitaciones",
        xlab="Longitud", ylab="Latitud")
+
+
+
+sp.layout.list <- list(
+  list("sp.points", df_sp, col="black", pch=20, cex=1),
+  list("sp.text",
+       coordinates(df_sp),
+       txt = round(df_sp$Precipitaciones, 0),
+       cex = 0.75, font = 2, col="black")
+)
+
+spplot(ko_reml_sp, zcol="predict",
+       sp.layout = sp.layout.list,
+       col.regions=colorRampPalette(brewer.pal(9, "Blues"))(100),
+       contour = TRUE,
+       main = "Predicciones de Precipitaciones (mm/año)",
+       xlab = "Longitud", ylab = "Latitud")
+
+
+
+
+pred_grid <- expand.grid(
+  x = seq(min(geod$coords[,1]), max(geod$coords[,1]), l = 300),
+  y = seq(min(geod$coords[,2]), max(geod$coords[,2]), l = 300)
+)
+
+ko_reml <- krige.conv(geod, locations = pred_grid, krige = krige.control(obj.model = selected_variogram))
+
+df_sp <- df
+coordinates(df_sp) <- ~ Longitud + Latitud
+
+ko_reml_sp <- SpatialPixelsDataFrame(points=pred_grid, data = data.frame(ko_reml[1:2]))
+
+
+spplot(
+  ko_reml_sp, 
+  zcol = "predict",
+  col.regions = colorRampPalette(brewer.pal(9, "Blues"))(100),
+  contour = TRUE,
+  main = "Mapa Kriging de Precipitaciones en el NOA (mm/año)",
+  xlab = "Longitud (°O)",
+  ylab = "Latitud (°S)",
+  scales = list(draw = TRUE, tck = c(1,1)),   # ticks hacia adentro
+  sp.layout = list(
+    list("sp.points", df_sp, col = "black", pch = 20, cex = 1.2),
+    list("sp.text", coordinates(df_sp), 
+         txt = round(df_sp$Precipitaciones, 1), 
+         pos = 1, cex = 0.75, col = "black"),
+    list("sp.text", coordinates(df_sp), 
+         txt = df_sp$Localidad, 
+         pos = 3, cex = 0.75, col = "black", font = 3),
+    list("SpatialPolygonsRescale", layout.scale.bar(),
+         offset = c(-66, -26), scale = 1)
+  )
+)
+
+
+x_ticks <- round(seq(min(geod$coords[,1]), max(geod$coords[,1]), by = 0.5), digits = 2)
+y_ticks <- round(seq(min(geod$coords[,2]), max(geod$coords[,2]), by = 0.5), digits = 2)
+
+ko_reml_var_sp <- SpatialPixelsDataFrame(points = pred_grid, data = data.frame(ko_reml$krige.var))
+
+spplot(ko_reml_var_sp, zcol="ko_reml.krige.var",
+       sp.layout = list("sp.points", df_sp, col="black", pch=20),
+       col.regions = colorRampPalette(brewer.pal(9, "Blues"))(100),
+       contour=FALSE,
+       main="Superficie de varianzas y puntos de muestreo (Precipitaciones)",
+       xlab="Longitud", ylab="Latitud",
+       key.space = "right",
+       scales = list(x = list(at = x_ticks),
+                     y = list(at = y_ticks)
+       )
+)
+
 
 
 pred_values <- ko_reml$predict
