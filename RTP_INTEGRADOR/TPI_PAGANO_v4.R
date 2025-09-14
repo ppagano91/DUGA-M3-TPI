@@ -690,3 +690,72 @@ mean(pred_values, na.rm=TRUE)
 sd(pred_values, na.rm=TRUE)
 range(pred_values, na.rm=TRUE)
 quantile(pred_values, probs=c(0.25, 0.5, 0.75), na.rm=TRUE)
+
+
+
+library(sf)
+
+# bounding box del área de predicción
+min_lon <- min(pred_grid$x, na.rm = TRUE)
+max_lon <- max(pred_grid$x, na.rm = TRUE)
+min_lat <- min(pred_grid$y, na.rm = TRUE)
+max_lat <- max(pred_grid$y, na.rm = TRUE)
+
+bbox_coords <- matrix(
+  c(min_lon, min_lat,
+    max_lon, min_lat,
+    max_lon, max_lat,
+    min_lon, max_lat,
+    min_lon, min_lat),
+  ncol = 2,
+  byrow = TRUE
+)
+
+bbox_polygon <- st_sfc(st_polygon(list(bbox_coords)), crs = 4326)
+bbox_sf <- st_sf(geometry = bbox_polygon)
+
+st_write(bbox_sf, "area_prediccion.shp", driver = "ESRI Shapefile", append = FALSE)
+cat("✅ area_prediccion.shp exportado\n")
+
+# convertir a sf
+puntos_muestreo_sf <- st_as_sf(df, coords = c("Longitud", "Latitud"), crs = 4326)
+
+st_write(puntos_muestreo_sf, "puntos_muestreo.shp", driver = "ESRI Shapefile", append = FALSE)
+cat("✅ puntos_muestreo.shp exportado\n")
+
+
+x_unique <- unique(pred_grid$x)
+y_unique <- unique(pred_grid$y)
+z_matrix <- matrix(ko_reml$predict, nrow = length(x_unique), ncol = length(y_unique))
+
+contour_lines <- contourLines(x = x_unique, y = y_unique, z = z_matrix)
+
+lines_sf_list <- lapply(seq_along(contour_lines), function(i) {
+  st_linestring(cbind(contour_lines[[i]]$x, contour_lines[[i]]$y))
+})
+
+contours_sf <- st_sf(
+  level = sapply(contour_lines, function(cl) cl$level),
+  geometry = st_sfc(lines_sf_list, crs = 4326)
+)
+
+st_write(contours_sf, "isoprecipitaciones.shp", driver = "ESRI Shapefile", append = FALSE)
+cat("✅ isoprecipitaciones.shp exportado\n")
+
+
+raster_predicciones_sp <- raster(ko_reml_sp)
+
+crs(raster_predicciones_sp) <-CRS("+init=epsg:4326")
+
+writeRaster(raster_predicciones_sp, "predicciones_ppts.tif", format="GTiff", overwrite=TRUE)
+cat("✅ predicciones_ppts.tif")
+
+
+raster_varianzas_sp <- raster(ko_reml_var_sp)
+
+crs(raster_varianzas_sp) <-CRS("+init=epsg:4326")
+
+writeRaster(raster_varianzas_sp, "varianzas_ppts.tif", format="GTiff", overwrite=TRUE)
+cat("✅ predicciones_ppts.tif ")
+
+writeLines(.packages(), "requirements.txt")
